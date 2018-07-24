@@ -216,6 +216,54 @@ class GNN_nl(nn.Module):
 
         return out[:, 0, :]
 
+
+class GNN_nl_patch(nn.Module):
+    def __init__(self, args, input_features, nf, J):
+        super(GNN_nl_patch, self).__init__()
+        self.args = args
+        self.input_features = input_features
+        self.nf = nf
+        self.J = J
+
+        if args.dataset == 'mini_imagenet':
+            self.num_layers = 2
+        else:
+            self.num_layers = 2
+
+        for i in range(self.num_layers):
+            if i == 0:
+                module_w = Wcompute(self.input_features, nf, operator='J2', activation='softmax', ratio=[2, 2, 1, 1])
+                module_l = Gconv(self.input_features, int(nf / 2), 2)
+            else:
+                module_w = Wcompute(self.input_features + int(nf / 2) * i, nf, operator='J2', activation='softmax', ratio=[2, 2, 1, 1])
+                module_l = Gconv(self.input_features + int(nf / 2) * i, int(nf / 2), 2)
+            self.add_module('layer_w{}'.format(i), module_w)
+            self.add_module('layer_l{}'.format(i), module_l)
+
+        self.conv1 = nn.Conv1d(self.input_features + int(nf / 2) * self.num_layers, self.nf, kernel_size=4,
+                               stride=4, padding=0, bias=False)
+        self.bn1 = nn.BatchNorm1d(self.nf)
+
+
+    def forward(self, x):
+        W_init = Variable(torch.eye(x.size(1)).unsqueeze(0).repeat(x.size(0), 1, 1).unsqueeze(3))
+        if self.args.cuda:
+            W_init = W_init.cuda()
+
+        for i in range(self.num_layers):
+            Wi = self._modules['layer_w{}'.format(i)](x, W_init)
+
+            x_new = F.leaky_relu(self._modules['layer_l{}'.format(i)]([Wi, x])[1])
+            x = torch.cat([x, x_new], 2)
+
+        x = torch.transpose(x, 2, 1)
+        x = self.conv1(x)
+        x = self.bn1(x)
+        output = F.leaky_relu(x, 0.2, inplace=True)
+
+        return output
+
+
 class GNN_active(nn.Module):
     def __init__(self, args, input_features, nf, J):
         super(GNN_active, self).__init__()

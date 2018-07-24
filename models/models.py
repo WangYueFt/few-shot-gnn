@@ -77,11 +77,12 @@ class EmbeddingImagenet(nn.Module):
         self.bn4 = nn.BatchNorm2d(self.ndf*4)
         self.drop_4 = nn.Dropout2d(0.5)
 
-        # Input 5x5x256
-        self.fc1 = nn.Linear(self.ndf*4*5*5, self.emb_size, bias=True)
-        self.bn_fc = nn.BatchNorm1d(self.emb_size)
+        # Input 5x5x128
+        self.conv5 = nn.Conv2d(self.ndf*4, self.emb_size, kernel_size=4, bias=False)
+        self.bn5 = nn.BatchNorm2d(self.emb_size)
 
     def forward(self, input):
+        batch_size = input.size()[0]
         e1 = F.max_pool2d(self.bn1(self.conv1(input)), 2)
         x = F.leaky_relu(e1, 0.2, inplace=True)
         e2 = F.max_pool2d(self.bn2(self.conv2(x)), 2)
@@ -92,8 +93,10 @@ class EmbeddingImagenet(nn.Module):
         e4 = F.max_pool2d(self.bn4(self.conv4(x)), 2)
         x = F.leaky_relu(e4, 0.2, inplace=True)
         x = self.drop_4(x)
-        x = x.view(-1, self.ndf*4*5*5)
-        output = self.bn_fc(self.fc1(x))
+        x = self.conv5(x)
+        output = F.leaky_relu(self.bn5(x), 0.2, inplace=True)
+        # Output 2x2xnf
+        output = output.view(batch_size, 2*2, self.emb_size)
 
         return [e1, e2, e3, e4, None, output]
 
@@ -110,6 +113,7 @@ class MetricNN(nn.Module):
             assert(self.args.train_N_way == self.args.test_N_way)
             num_inputs = self.emb_size + self.args.train_N_way
             if self.args.dataset == 'mini_imagenet':
+                self.gnn_obj_patch = gnn_iclr.GNN_nl_patch(args, self.emb_size, nf=96, J=1)
                 self.gnn_obj = gnn_iclr.GNN_nl(args, num_inputs, nf=96, J=1)
             elif 'omniglot' in self.args.dataset:
                 self.gnn_obj = gnn_iclr.GNN_nl_omniglot(args, num_inputs, nf=96, J=1)
@@ -126,7 +130,16 @@ class MetricNN(nn.Module):
         if self.args.cuda:
             zero_pad = zero_pad.cuda()
 
+        zi_s = [z] + zi_s
+
+        nodes = [node.unsqueeze(1) for node in zi_s]
+        nodes = torch.cat(nodes, 1)
+        nodes = self.gnn_obj_patch(nodes)
+
         labels_yi = [zero_pad] + labels_yi
+
+        zi_s = torch.chunk(nodes, len(labels_yi), dim=2)
+
         zi_s = [z] + zi_s
 
         nodes = [torch.cat([zi, label_yi], 1) for zi, label_yi in zip(zi_s, labels_yi)]
