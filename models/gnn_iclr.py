@@ -83,7 +83,6 @@ class Wcompute(nn.Module):
         W2 = torch.transpose(W1, 1, 2) #size: bs x N x N x num_features
         W_new = torch.abs(W1 - W2) #size: bs x N x N x num_features
         W_new = torch.transpose(W_new, 1, 3) #size: bs x num_features x N x N
-
         W_new = self.conv2d_1(W_new)
         W_new = self.bn_1(W_new)
         W_new = F.leaky_relu(W_new)
@@ -236,31 +235,33 @@ class GNN_nl_patch(nn.Module):
                 module_l = Gconv(self.input_features, int(nf / 2), 2)
             else:
                 module_w = Wcompute(self.input_features + int(nf / 2) * i, nf, operator='J2', activation='softmax', ratio=[2, 2, 1, 1])
-                module_l = Gconv(self.input_features + int(nf / 2) * i, int(nf / 2), 2)
+                module_l = Gconv(self.input_features + int(nf / 2) * i, self.input_features, 2)
             self.add_module('layer_w{}'.format(i), module_w)
             self.add_module('layer_l{}'.format(i), module_l)
 
-        self.conv1 = nn.Conv1d(self.input_features + int(nf / 2) * self.num_layers, self.nf, kernel_size=4,
+        self.drop1 = nn.Dropout(0.5)
+        self.conv1 = nn.Conv1d(self.input_features, 128, kernel_size=4,
                                stride=4, padding=0, bias=False)
-        self.bn1 = nn.BatchNorm1d(self.nf)
+        self.bn1 = nn.BatchNorm1d(128)
 
 
     def forward(self, x):
         W_init = Variable(torch.eye(x.size(1)).unsqueeze(0).repeat(x.size(0), 1, 1).unsqueeze(3))
         if self.args.cuda:
             W_init = W_init.cuda()
+        shortcut = x
 
         for i in range(self.num_layers):
             Wi = self._modules['layer_w{}'.format(i)](x, W_init)
 
             x_new = F.leaky_relu(self._modules['layer_l{}'.format(i)]([Wi, x])[1])
             x = torch.cat([x, x_new], 2)
-
+        x = shortcut + x_new
         x = torch.transpose(x, 2, 1)
+        x = self.drop1(x)
         x = self.conv1(x)
         x = self.bn1(x)
         output = F.leaky_relu(x, 0.2, inplace=True)
-
         return output
 
 

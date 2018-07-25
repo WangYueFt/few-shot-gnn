@@ -2,6 +2,7 @@ from __future__ import print_function
 import os
 import argparse
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.autograd import Variable
@@ -88,6 +89,9 @@ else:
 def train_batch(model, data):
     [enc_nn, metric_nn, softmax_module] = model
     [batch_x, label_x, batches_xi, labels_yi, oracles_yi, hidden_labels] = data
+    
+    enc_nn = nn.DataParallel(enc_nn)
+    metric_nn = nn.DataParallel(metric_nn)
 
     # Compute embedding from x and xi_s
     z = enc_nn(batch_x)[-1]

@@ -80,6 +80,7 @@ class EmbeddingImagenet(nn.Module):
         # Input 5x5x128
         self.conv5 = nn.Conv2d(self.ndf*4, self.emb_size, kernel_size=4, bias=False)
         self.bn5 = nn.BatchNorm2d(self.emb_size)
+        # self.drop_5 = nn.Dropout2d(0.5)
 
     def forward(self, input):
         batch_size = input.size()[0]
@@ -96,6 +97,7 @@ class EmbeddingImagenet(nn.Module):
         x = self.conv5(x)
         output = F.leaky_relu(self.bn5(x), 0.2, inplace=True)
         # Output 2x2xnf
+        # output = self.drop_5(output)
         output = output.view(batch_size, 2*2, self.emb_size)
 
         return [e1, e2, e3, e4, None, output]
@@ -129,19 +131,18 @@ class MetricNN(nn.Module):
         zero_pad = Variable(torch.zeros(labels_yi[0].size()))
         if self.args.cuda:
             zero_pad = zero_pad.cuda()
-
         zi_s = [z] + zi_s
 
-        nodes = [node.unsqueeze(1) for node in zi_s]
+        nodes = zi_s
         nodes = torch.cat(nodes, 1)
         nodes = self.gnn_obj_patch(nodes)
-
+ 
         labels_yi = [zero_pad] + labels_yi
 
         zi_s = torch.chunk(nodes, len(labels_yi), dim=2)
 
-        zi_s = [z] + zi_s
-
+        zi_s = [node.squeeze() for node in zi_s]
+        
         nodes = [torch.cat([zi, label_yi], 1) for zi, label_yi in zip(zi_s, labels_yi)]
         nodes = [node.unsqueeze(1) for node in nodes]
         nodes = torch.cat(nodes, 1)
